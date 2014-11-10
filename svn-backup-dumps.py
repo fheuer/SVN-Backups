@@ -43,7 +43,7 @@
 #    6. Create bzipped dump files.
 #    7. Transfer the dumpfile to another host using ftp.
 #    8. Transfer the dumpfile to another host using smb.
-#    9. Transfer the dumpfile to Dropbox
+#    9. Transfer the dumpfile to Dropbox.
 #
 # See also 'svn-backup-dumps.py -h'.
 #
@@ -147,7 +147,7 @@
 #    If <path> contains the string '%r' it is replaced by the
 #    repository name (basename of the repository path).
 #
-# 9. Transfer the dumpfile to Dropbox
+# 9. Transfer the dumpfile to Dropbox.
 #
 #    svn-backup-dumps.py -t dropbox:<share>:<user>:<password>:<path> ...
 #
@@ -672,10 +672,32 @@ class DropboxConnection:
     request_id = ""
     browser = None
     
+    def monkeypatch_mechanize(self):
+        import mechanize
+        if mechanize.__version__ < (0, 2, 6):
+            from mechanize._form import SubmitControl, ScalarControl
+
+            def __init__(self, type, name, attrs, index=None):
+                ScalarControl.__init__(self, type, name, attrs, index)
+                # IE5 defaults SUBMIT value to "Submit Query"; Firebird 0.6 leaves it
+                # blank, Konqueror 3.1 defaults to "Submit".  HTML spec. doesn't seem
+                # to define this.
+                if self.value is None:
+                    if self.disabled:
+                        self.disabled = False
+                        self.value = ""
+                        self.disabled = True
+                    else:
+                        self.value = ""
+                self.readonly = True
+
+            SubmitControl.__init__ = __init__
+
     def __init__(self,email,password):
         self.email = email
         self.password = password
         
+        self.monkeypatch_mechanize()
         self.login()
 
     def login(self):
@@ -755,10 +777,9 @@ class DropboxConnection:
         self.browser.form.set_value(remote_dir,"dest")
         self.browser.form.find_control("mtime_utc").readonly = False
         self.browser.form.set_value(str(int(time.time())), "mtime_utc")
-        self.browser.form.add_file(open(local_file,"rb"),"",remote_file)
-        
-        # Submit the form with the file
-        self.browser.submit()
+        with open(local_file,"rb") as f:
+            self.browser.form.add_file(f,"",remote_file)            
+            self.browser.submit()
         
     def get_dir_list(self,remote_dir):
         """ Get file info for a directory """
